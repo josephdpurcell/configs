@@ -1,5 +1,3 @@
-#	$OpenBSD: sshd_config,v 1.98 2016/02/17 05:29:04 djm Exp $
-
 # Instructions:
 #   1. Change the ListenAddress X.X.X.X to whatever the IP is you want to SSH
 #      into, e.g. the public IP.
@@ -118,7 +116,7 @@ GSSAPICleanupCredentials no
 UsePAM yes
 
 #AllowAgentForwarding yes
-#AllowTcpForwarding yes
+AllowTcpForwarding no
 #GatewayPorts no
 X11Forwarding no
 #X11DisplayOffset 10
@@ -130,7 +128,7 @@ PrintMotd no
 # WARNING: 'UseLogin yes' is not supported in Fedora and may cause several
 # problems.
 #UseLogin no
-#UsePrivilegeSeparation sandbox
+UsePrivilegeSeparation sandbox
 #PermitUserEnvironment no
 #Compression delayed
 ClientAliveInterval 300
