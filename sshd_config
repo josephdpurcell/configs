@@ -1,5 +1,12 @@
 #	$OpenBSD: sshd_config,v 1.98 2016/02/17 05:29:04 djm Exp $
 
+# Instructions:
+#   1. Change the ListenAddress X.X.X.X to whatever the IP is you want to SSH
+#      into, e.g. the public IP.
+#   2. Ensure all users SSH'ing into the server have group "sshusers".
+#   3. Change the Port 22 to something different.
+#   4. Move the sshd_banner.txt to /etc/issue.sshd
+
 # This is the sshd server system-wide configuration file.  See
 # sshd_config(5) for more information.
 
@@ -14,13 +21,13 @@
 # SELinux about this change.
 # semanage port -a -t ssh_port_t -p tcp #PORTNUMBER
 #
-#Port 22
+Port 22
 #AddressFamily any
-#ListenAddress 0.0.0.0
+ListenAddress X.X.X.X
 #ListenAddress ::
 
 # The default requires explicit activation of protocol 1
-#Protocol 2
+Protocol 2
 
 # HostKey for protocol version 1
 #HostKey /etc/ssh/ssh_host_key
@@ -45,9 +52,9 @@ SyslogFacility AUTHPRIV
 
 # Authentication:
 
-#LoginGraceTime 2m
-PermitRootLogin yes
-#StrictModes yes
+LoginGraceTime 20
+PermitRootLogin no
+StrictModes yes
 #MaxAuthTries 6
 #MaxSessions 10
 
@@ -63,6 +70,8 @@ AuthorizedKeysFile	.ssh/authorized_keys
 #AuthorizedKeysCommand none
 #AuthorizedKeysCommandUser nobody
 
+AllowGroups sshusers
+
 # For this to work you will also need host keys in /etc/ssh/ssh_known_hosts
 #RhostsRSAAuthentication no
 # similar for protocol version 2
@@ -74,12 +83,11 @@ AuthorizedKeysFile	.ssh/authorized_keys
 #IgnoreRhosts yes
 
 # To disable tunneled clear text passwords, change to no here!
-#PasswordAuthentication yes
-#PermitEmptyPasswords no
-PasswordAuthentication yes
+PasswordAuthentication no
+PermitEmptyPasswords no
+PasswordAuthentication no
 
 # Change to no to disable s/key passwords
-#ChallengeResponseAuthentication yes
 ChallengeResponseAuthentication no
 
 # Kerberos options
@@ -90,7 +98,7 @@ ChallengeResponseAuthentication no
 #KerberosUseKuserok yes
 
 # GSSAPI options
-GSSAPIAuthentication yes
+GSSAPIAuthentication no
 GSSAPICleanupCredentials no
 #GSSAPIStrictAcceptorCheck yes
 #GSSAPIKeyExchange no
@@ -112,11 +120,11 @@ UsePAM yes
 #AllowAgentForwarding yes
 #AllowTcpForwarding yes
 #GatewayPorts no
-X11Forwarding yes
+X11Forwarding no
 #X11DisplayOffset 10
 #X11UseLocalhost yes
 #PermitTTY yes
-#PrintMotd yes
+PrintMotd no
 #PrintLastLog yes
 #TCPKeepAlive yes
 # WARNING: 'UseLogin yes' is not supported in Fedora and may cause several
@@ -125,8 +133,8 @@ X11Forwarding yes
 #UsePrivilegeSeparation sandbox
 #PermitUserEnvironment no
 #Compression delayed
-#ClientAliveInterval 0
-#ClientAliveCountMax 3
+ClientAliveInterval 300
+ClientAliveCountMax 0
 #ShowPatchLevel no
 #UseDNS no
 #PidFile /var/run/sshd.pid
@@ -136,7 +144,7 @@ X11Forwarding yes
 #VersionAddendum none
 
 # no default banner path
-#Banner none
+Banner /etc/issue.sshd
 
 # Accept locale-related environment variables
 AcceptEnv LANG LC_CTYPE LC_NUMERIC LC_TIME LC_COLLATE LC_MONETARY LC_MESSAGES
