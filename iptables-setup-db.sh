@@ -11,6 +11,9 @@
 # Instructions:
 #   1. Change the X.X.X.X to the server that will be connecting to MySQL.
 #   2. Change the Y.Y.Y.Y IPs to any IPs you want to SSH from.
+#
+# Tip:
+#   * Run "iptables --list --numeric --line-numbers --verbose" to list iptables
 
 # Clear all iptable rules.
 iptables -F
