@@ -10,6 +10,9 @@
 #
 # Instructions:
 #   1. Change the Y.Y.Y.Y IPs to any IPs you want to SSH from.
+#
+# Tip:
+#   * Run "iptables --list --numeric --line-numbers --verbose" to list iptables
 
 # Clear all iptable rules.
 iptables -F
