@@ -30,8 +30,8 @@ iptables -A INPUT -p tcp --dport 80 -j ACCEPT -m comment --comment "allow HTTP f
 iptables -A INPUT -p tcp --dport 443 -j ACCEPT -m comment --comment "allow HTTPS from WAN"
 
 # Also allow SSH from these IPs:
-iptables -A INPUT -p tcp -s X.X.X.X --dport 22 -j ACCEPT -m comment --comment "allow SSH from X.X.X.X"
-iptables -A INPUT -p tcp -s X.X.X.X --dport 22 -j ACCEPT -m comment --comment "allow SSH from X.X.X.X"
+iptables -A INPUT -p tcp -s X.X.X.X --dport 22 -j ACCEPT -m comment --comment "allow SSH from ACME office"
+iptables -A INPUT -p tcp -s X.X.X.X --dport 22 -j ACCEPT -m comment --comment "allow SSH from Joe Home"
 
 # Drop all input that isn't accepted by a rule.
 iptables -P INPUT DROP
