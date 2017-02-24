@@ -19,26 +19,19 @@
 iptables -F
 iptables -X
 
-# Add rules for accepted input.
-# Allow any connection that originated from this server.
-iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
-# Accept everything no matter port on the loopback interface.
-iptables -A INPUT -i lo -j ACCEPT
-# Drop all null packets (recon packets).
-iptables -A INPUT -p tcp --tcp-flags ALL NONE -j DROP
-# Drop all empty connections (syn-flood packets).
-iptables -A INPUT -p tcp ! --syn -m state --state NEW -j DROP
-# Drop all packets full of options (XMAS packets, also recon packets).
-iptables -A INPUT -p tcp --tcp-flags ALL ALL -j DROP
+# Add rules for input.
+iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT -m comment --comment "allow all connections originating from server"
+iptables -A INPUT -i lo -j ACCEPT -m comment --comment "allow everything on loopback interface"
+iptables -A INPUT -p tcp --tcp-flags ALL NONE -j DROP -m comment --comment "drop null packets"
+iptables -A INPUT -p tcp ! --syn -m state --state NEW -j DROP -m comment --comment "drop empty connections and syn-flood packets"
+iptables -A INPUT -p tcp --tcp-flags ALL ALL -j DROP -m comment --comment "drop XMAS packets"
 
-# Block all inbound traffic except for MySQL from the app server.
-iptables -A INPUT -p tcp -s X.X.X.X --dport 3306 -j ACCEPT
+# Block all inbound traffic except for whitelisted IPs.
+iptables -A INPUT -p tcp -s X.X.X.X --dport 3306 -j ACCEPT -m comment --comment "allow MySQL from App Server"
 
 # Also allow SSH from these IPs:
-# ACME Office
-iptables -A INPUT -p tcp -s Y.Y.Y.Y --dport 22 -j ACCEPT
-# Other Example Office
-iptables -A INPUT -p tcp -s Y.Y.Y.Y --dport 22 -j ACCEPT
+iptables -A INPUT -p tcp -s X.X.X.X --dport 22 -j ACCEPT -m comment --comment "allow SSH from ACME office"
+iptables -A INPUT -p tcp -s X.X.X.X --dport 22 -j ACCEPT -m comment --comment "allow SSH from Joe Home"
 
 # Drop all input that isn't accepted by a rule.
 iptables -P INPUT DROP
