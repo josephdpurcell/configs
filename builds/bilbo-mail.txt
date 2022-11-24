@@ -1,0 +1,717 @@
+# bilbo-mail
+
+These are build notes for a mail server used for:
+
+* Sending an email newsletter to friends and family
+
+Assumptions:
+
+* You want to use hello@example.com as your email address
+* Your web server has an A record on example.com pointing to 99.0.0.1 (not really required, just for show)
+* Your mail server has an A record on mail.example.com pointing to 99.0.0.2
+* You have an ubuntu server with docker-mailserver installed and thats the only thing running on it
+
+# RELATED
+
+A few build notes from others:
+
+* https://docker-mailserver.github.io/docker-mailserver/edge/examples/tutorials/basic-installation/
+* https://jackharley.com/2021/05/degoogling-my-email-with-docker-mailserver/
+* https://andycallaghan.com/posts/deploy-a-gmail-like-email-server-in-30-minutes/
+
+# USAGE
+
+Things to remember when using it:
+
+# Did I setup certbot? If not, need to regenerate SSL cert before expiry.
+
+# start/stop:
+# Use docker-compose up / down, not docker-compose start / stop. Otherwise, the container is not properly destroyed and you may experience problems during startup because of inconsistent state.
+cd /var/www/example.com/docker/
+docker compose up -d mailserver
+docker compose down
+
+# login
+docker exec -it mailserver /bin/bash
+
+# account management
+bash setup.sh help
+bash setup.sh email [add|update|del|restrict|list] help
+# List accounts:
+bash setup.sh email list
+# Change password:
+bash setup.sh email update hello@example.com 'thepass'
+# Delete account:
+bash setup.sh email del hello2@mail.example.com
+
+# CONFIG NOTES
+
+Things to keep in mind in genearal during setup and configuration.
+
+It's very common for people to want a "hello@example.com". But, maybe "example.com" is pointing to a website already with its own SSL cert. What you do is:
+
+* Setup a DNS A record "mail.example.com" pointing to your mail server
+* Set your MX record to host "@" with value "mail.example.com"
+* Configure docker-mailserver hostname to "mail" and domain to "mail.example.com"
+* Use a SSL cert for "mail.example.com"
+* The DKIM selector must always be "mail" (unless you patch)
+* Port 587 is what you use to send mail through
+
+DigitalOcean notes:
+
+* Bandwidth cap: https://www.digitalocean.com/community/questions/billing-for-bandwidth-overage
+* port 25 block: https://www.digitalocean.com/community/questions/port-25-465-is-blocked-how-can-i-enable-it?comment=174124  and: https://docs.digitalocean.com/support/why-is-smtp-blocked/; this didn't seem to apply to me
+* DigitalOcean requires the name of the droplet to be the FQDN for reverse DNS to work https://brandonio21.com/reverse-dns-rdns-and-digitalocean/ and: https://www.digitalocean.com/community/questions/how-do-i-set-up-reverse-dns-for-my-ip
+
+-----------------------------------------------------------------------------------
+# Create droplet w backups
+
+Login to DigitalOcean and create an ubuntu LTS droplet with backups.
+
+-----------------------------------------------------------------------------------
+# Install reporting
+
+curl -sSL https://repos.insights.digitalocean.com/install.sh | sudo bash
+
+-----------------------------------------------------------------------------------
+# Install tools
+
+apt install net-tools
+
+-----------------------------------------------------------------------------------
+# SETUP USER
+
+groupadd bilbo
+useradd -d /home/bilbo -g bilbo -s /bin/bash bilbo
+mkdir /home/bilbo
+chown bilbo:bilbo /home/bilbo
+adduser bilbo sudo
+passwd bilbo
+
+su bilbo
+ssh-keygen -t rsa -b 4096
+# Add ssh key to ~/.ssh/authorized_keys
+chmod g-w ~/.ssh/authorized_keys
+
+-----------------------------------------------------------------------------------
+# SETUP GIT
+
+# git is already installed
+
+git config --global user.email "myemail"
+git config --global user.name "Joseph D. Purcell"
+
+-----------------------------------------------------------------------------------
+# FIREWALL
+
+sudo apt-get install iptables-persistent
+
+iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT -m comment --comment "allow all connections originating from server"
+iptables -A INPUT -i lo -j ACCEPT -m comment --comment "allow everything on loopback interface"
+iptables -A INPUT -p tcp --tcp-flags ALL NONE -j DROP -m comment --comment "drop null packets"
+iptables -A INPUT -p tcp ! --syn -m state --state NEW -j DROP -m comment --comment "drop empty connections and syn-flood packets"
+iptables -A INPUT -p tcp --tcp-flags ALL ALL -j DROP -m comment --comment "drop XMAS packets"
+
+iptables -A INPUT -p tcp --dport 25 -j ACCEPT -m comment --comment "allow Transfer/Relay (SMTP) from WAN"
+iptables -A INPUT -p tcp --dport 143 -j ACCEPT -m comment --comment "allow Retrieval (IMAP) from WAN"
+iptables -A INPUT -p tcp --dport 587 -j ACCEPT -m comment --comment "allow Submission (ESMPT, RFC6409) from WAN"
+iptables -A INPUT -p tcp --dport 993 -j ACCEPT -m comment --comment "allow Retrieval (IMAP TLS) from WAN"
+# POP3 not activated
+
+iptables -A INPUT -p tcp --dport 22 -j ACCEPT -m comment --comment "allow SSH from WAN"
+
+iptables -P INPUT DROP
+iptables -P FORWARD DROP
+iptables -P OUTPUT ACCEPT
+
+iptables --list --numeric --line-numbers --verbose
+
+cp /etc/iptables/rules.v4 /etc/iptables/rules.v4-2022-11-17-1030
+iptables-save > /etc/iptables/rules.v4
+
+ip6tables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT -m comment --comment "allow all connections originating from server"
+ip6tables -A INPUT -i lo -j ACCEPT -m comment --comment "allow everything on loopback interface"
+ip6tables -A INPUT -p tcp --tcp-flags ALL NONE -j DROP -m comment --comment "drop null packets"
+ip6tables -A INPUT -p tcp ! --syn -m state --state NEW -j DROP -m comment --comment "drop empty connections and syn-flood packets"
+ip6tables -A INPUT -p tcp --tcp-flags ALL ALL -j DROP -m comment --comment "drop XMAS packets"
+
+ip6tables -A INPUT -p tcp --dport 25 -j ACCEPT -m comment --comment "allow Transfer/Relay (SMTP) from WAN"
+ip6tables -A INPUT -p tcp --dport 143 -j ACCEPT -m comment --comment "allow Retrieval (IMAP) from WAN"
+ip6tables -A INPUT -p tcp --dport 587 -j ACCEPT -m comment --comment "allow Submission (ESMPT, RFC6409) from WAN"
+ip6tables -A INPUT -p tcp --dport 993 -j ACCEPT -m comment --comment "allow Retrieval (IMAP TLS) from WAN"
+
+ip6tables -A INPUT -p tcp --dport 22 -j ACCEPT -m comment --comment "allow SSH from WAN"
+
+ip6tables -P INPUT DROP
+ip6tables -P FORWARD DROP
+ip6tables -P OUTPUT ACCEPT
+
+ip6tables --list --numeric --line-numbers --verbose
+
+cp /etc/iptables/rules.v6 /etc/iptables/rules.v6-2022-11-17-1030
+ip6tables-save > /etc/iptables/rules.v6
+
+-----------------------------------------------------------------------------------
+# SSH
+
+Modify following configs
+
+-----------------------------------------------------------------------------------
+# Unattended upgrades
+
+Modify following configs
+
+# Note sure if this is needed:
+service unattended-upgrades restart
+
+-----------------------------------------------------------------------------------
+# LOGROTATE
+
+nothing
+
+-----------------------------------------------------------------------------------
+# Docker
+
+# Follow docker install https://docs.docker.com/engine/install/ubuntu/
+apt-get update
+sudo apt-get install \
+    ca-certificates \
+    curl \
+    gnupg \
+    lsb-release
+sudo mkdir -p /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+echo \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
+  $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+sudo apt-get update
+sudo apt-get install docker-ce docker-ce-cli containerd.io docker-compose-plugin
+sudo docker run hello-world
+
+-----------------------------------------------------------------------------------
+# certbot
+
+# https://certbot.eff.org/instructions?ws=other&os=ubuntufocal
+
+sudo snap install core
+sudo snap refresh core
+sudo apt-get remove certbot
+sudo snap install --classic certbot
+sudo ln -s /snap/bin/certbot /usr/bin/certbot
+
+# Temporarily allow port 80
+iptables -A INPUT -p tcp --dport 80 -j ACCEPT -m comment --comment "allow HTTP from WAN (temporary)"
+sudo certbot certonly --standalone
+# output included:
+# Successfully received certificate.
+# Certificate is saved at: /etc/letsencrypt/live/example.com/fullchain.pem
+# Key is saved at:         /etc/letsencrypt/live/example.com/privkey.pem
+sudo certbot renew --dry-run
+# Remove port
+sudo iptables -L --line-numbers
+sudo iptables -D INPUT THE_LINE_NUMBER
+sudo iptables -L --line-numbers
+
+-----------------------------------------------------------------------------------
+# docker-mailserver
+
+su bilbo
+mkdir -p ~/src/github.com/docker-mailserver/docker-mailserver
+cd ~/src/github.com/docker-mailserver/docker-mailserver
+git checkout v11.2.0
+
+sudo -s
+mkdir -p /var/www/example.com
+cd /var/www/example.com
+cp ~/src/github.com/docker-mailserver/docker-mailserver/docker-compose.yml .
+cp ~/src/github.com/docker-mailserver/docker-mailserver/mailserver.env .
+cp ~/src/github.com/docker-mailserver/docker-mailserver/setup.sh .
+bash setup.sh help
+
+docker-compose:
+    volumes:
+      - /etc/letsencrypt:/etc/letsencrypt
+
+# Modify mailserver.env to have:
+SSL_TYPE=letsencrypt
+POSTFIX_MAILBOX_SIZE_LIMIT=2048000000
+LOGWATCH_INTERVAL=daily
+REPORT_RECIPIENT=MY_EMAIL
+ENABLE_FAIL2BAN=1
+
+# https://github.com/docker-mailserver/docker-mailserver/blob/master/README.md#get-up-and-running
+cd /var/www/mail.example.com/docker/
+sudo -s
+bash setup.sh email add hello@example.com
+docker compose up -d mailserver
+bash setup.sh alias add postmaster@example.com hello@example.com
+
+-----------------------------------------------------------------------------------
+# DNS Records: A, MX, SPF, PTR, DKIM, DMARC
+
+# A
+# Need an A record that points to your mail server
+# You can have A for @ and A for * that point to different IPs; here we just need our MX domain to point to the server
+Type: A
+Host: mail
+Value: 137.184.107.26
+TTL: lowest
+
+# MX
+Type: MX
+Host: @
+Value: mail.example.com
+Priority: 10
+
+# SPF
+# Resources:
+# https://docker-mailserver.github.io/docker-mailserver/edge/config/best-practices/spf/#add-a-spf-record
+# https://www.spfwizard.net/
+# http://www.open-spf.org/FAQ/Common_mistakes/
+# Often an SPF record can be condensed down to something like v=spf1 ip4:x.x.x.x -all if there is only one outgoing mail server.
+# You can use telnet/openssl s_client to check:
+# HELO mail.example.com
+# http://www.open-spf.org/
+# https://www.namecheap.com/support/knowledgebase/article.aspx/317/2237/how-do-i-add-txtspfdkimdmarc-records-for-my-domain/
+# https://postale.io/fr/blog/the-spf-record-explained
+
+# Add this TXT record:
+Type: TXT
+Host: @
+Value: v=spf1 mx ~all
+TTL: lowest
+
+# And one for the HELO
+Type: TXT
+Host: mail
+Value: v=spf1 a ~all
+TTL: lowest
+
+# After testing, change "~all" to "-all" which changes the policy from softfail to hardfail, and increase the TTL
+
+# DKIM
+# This guide is useful: https://www.dnswatch.info/dkim/create-dns-record
+bash setup.sh config dkim keysize 1024 selector mail
+[   INF   ]  Creating DKIM private key '/tmp/docker-mailserver/opendkim/keys/example.com/mail.private'
+[   INF   ]  Creating DKIM private key '/tmp/docker-mailserver/opendkim/keys/mail.example.com/mail.private'
+docker exec -it mailserver /bin/bash
+cat /tmp/docker-mailserver/opendkim/keys/example.com/jp20221123.txt
+# use it as-is
+Type: TXT
+Host: mail._domainkey
+Value: v=DKIM1; h=sha256; k=rsa; p=thevalue
+TTL: lowest
+
+# Note: re-running config dkim doesn't overwrite the key
+
+dig mail._domainkey.example.com TXT
+
+# PTR
+
+The PTR is something controlled by whoever provided you the IP for the server
+In the case of DigitalOcean, when you make a Droplet you get an IP; you just name the server the FQDN, "mail.example.com" and you're set
+
+# DMARC
+# This is to get reports
+# https://easydmarc.com/pricing has a free option for low volume (10k emails/mo)
+# it gives you the value you need
+Type: TXT
+Host: _dmarc
+Value: v=DMARC1;p=none;rua=mailto:astring@rua.easydmarc.us;ruf=mailto:anotherstring@ruf.easydmarc.us;fo=1;
+TTL: lowest
+
+# Note: the docker-mailserver docs say a typical looks like:
+_dmarc.example.com. IN TXT "v=DMARC1; p=none; rua=mailto:dmarc.report@example.com; ruf=mailto:dmarc.report@example.com; sp=none; ri=86400"
+# And a more restrictive looks like:
+_dmarc IN TXT "v=DMARC1; p=quarantine; rua=mailto:dmarc.report@example.com; ruf=mailto:dmarc.report@example.com; fo=0; adkim=r; aspf=r; pct=100; rf=afrf; ri=86400; sp=quarantine"
+
+I suspect easydmarc will recommend stricter values once it knows how in-compliance I am
+
+My old value from dmarcian was:
+_dmarc.example.com. 60	IN	TXT	"v=DMARC1; p=none; rua=mailto:astring@ag.dmarcian.com; ruf=mailto:anotherstring@fr.dmarcian.com; fo=1;
+
+-----------------------------------------------------------------------------------
+# APPENDIX I. Testing
+
+There are a variety of testing tools out there that do the whole thing:
+
+* https://testconnectivity.microsoft.com/tests/InboundSMTP/input
+* https://testconnectivity.microsoft.com/tests/OutboundSMTP/input
+* https://www.appmaildev.com/en/dkim
+* https://www.mail-tester.com/
+* https://mxtoolbox.com/SuperTool.aspx
+* maybe http://www.open-spf.org/Tools/
+* https://dkimcore.org/tools/keycheck.html
+* https://www.appmaildev.com/en/dkim/
+* https://www.kitterman.com/spf/validate.html (https://www.kitterman.com/spf/source.html)
+
+-----------------------------------------------------------------------------------
+# APPENDIX I.A. Testing SSL
+
+# 1. Test that SSL certs work in and out
+
+# test ssl for letsencrypt (if using letsencrypt)
+docker exec -it mailserver /bin/bash
+cd /etc/letsencrypt/live/mail.example.com
+openssl x509 -in cert.pem -text -noout
+openssl rsa -in privkey.pem -check
+# Make sure md5s match
+openssl x509 -noout -modulus -in cert.pem | openssl md5
+openssl rsa -noout -modulus -in privkey.pem | openssl md5
+
+# 2. Make sure common name (CN) matches the host
+docker exec mailserver openssl s_client \
+  -connect 0.0.0.0:143 \
+  -starttls imap \
+  -CApath /etc/ssl/certs/ \
+  -showcerts
+# You should see CN=mail.example.com and O=Let's Encrypt
+
+# 3. Make sure dates are valid
+docker exec mailserver openssl s_client \
+  -connect 0.0.0.0:25 \
+  -starttls smtp \
+  -CApath /etc/ssl/certs/ \
+  2>/dev/null | openssl x509 -noout -dates
+# You should see a date range that is not expired
+
+# 4. Make sure port 25 connects
+# Outside of the container run:
+docker exec mailserver openssl s_client \
+  -connect 0.0.0.0:25 \
+  -starttls smtp \
+  -CApath /etc/ssl/certs/
+# You should get a 0 exit code and see this somewhere in the output:
+# Verify return code: 0 (ok)
+
+# 5. Make sure port 143 connects
+docker exec mailserver openssl s_client \
+  -connect 0.0.0.0:143 \
+  -starttls imap \
+  -CApath /etc/ssl/certs/
+# You should get a 0 exit code and see this somewhere in the output:
+# Verify return code: 0 (ok)
+
+-----------------------------------------------------------------------------------
+# APPENDIX I.B. Testing DNS Records: A, MX, SPF, PTR, DKIM, DMARC
+
+Using one of the tools at the top of the section is easiest. Here are some key things:
+
+# A
+dig example.com A +short
+99.0.0.1
+dig mail.example.com A +short
+99.0.0.2
+
+# SPF (note: should be -all instead of ~all)
+dig example.com TXT +short
+"v=spf1 mx ~all"
+dig mail.example.com TXT +short
+"v=spf1 a ~all"
+
+# PTR
+host 99.0.0.2
+1.2.3.4.in-addr.arpa domain name pointer mail.example.com.
+
+# DKIM
+dig mail._domainkey.example.com TXT +short
+"v=DKIM1; h=sha256; k=rsa; p=alongstring"
+
+# DMARC
+dig _dmarc.example.com TXT +short
+"v=DMARC1;p=none;rua=mailto:string@rua.easydmarc.us;ruf=mailto:anotherstring@ruf.easydmarc.us;fo=1;"
+
+-----------------------------------------------------------------------------------
+# APPENDIX I.C. Testing - Security
+
+# The general tools at the top of this section will check for open relays, like Microsoft's tool.
+
+# See what ports are open from another server:
+nmap -Pn mail.example.com
+PORT    STATE SERVICE
+22/tcp  open  ssh
+25/tcp  open  smtp
+143/tcp open  imap
+465/tcp open  smtps
+587/tcp open  submission
+993/tcp open  imaps
+Nmap done: 1 IP address (1 host up) scanned in 18.52 seconds
+
+# See the port mapping on the server itself:
+docker port mailserver
+143/tcp -> 0.0.0.0:143
+143/tcp -> :::143
+25/tcp -> 0.0.0.0:25
+25/tcp -> :::25
+465/tcp -> 0.0.0.0:465
+465/tcp -> :::465
+587/tcp -> 0.0.0.0:587
+587/tcp -> :::587
+993/tcp -> 0.0.0.0:993
+993/tcp -> :::993
+
+# Also you can use netstat to see whats open:
+netstat -tulpn | grep docker
+tcp        0      0 0.0.0.0:25              0.0.0.0:*               LISTEN      1219112/docker-prox
+tcp        0      0 0.0.0.0:587             0.0.0.0:*               LISTEN      1219052/docker-prox
+tcp        0      0 0.0.0.0:143             0.0.0.0:*               LISTEN      1219092/docker-prox
+tcp        0      0 0.0.0.0:993             0.0.0.0:*               LISTEN      1219033/docker-prox
+tcp        0      0 0.0.0.0:465             0.0.0.0:*               LISTEN      1219072/docker-prox
+tcp6       0      0 :::25                   :::*                    LISTEN      1219117/docker-prox
+tcp6       0      0 :::587                  :::*                    LISTEN      1219057/docker-prox
+tcp6       0      0 :::143                  :::*                    LISTEN      1219097/docker-prox
+tcp6       0      0 :::993                  :::*                    LISTEN      1219037/docker-prox
+tcp6       0      0 :::465                  :::*                    LISTEN      1219077/docker-prox
+
+# Check if a specific port is open:
+nc -w 1 -z 99.0.0.2 25; echo $?
+1
+nc -w 1 -z 99.0.0.2 587; echo $?
+0
+
+-----------------------------------------------------------------------------------
+# APPENDIX I.D. Testing - Receiving email on an account
+
+# Helpful article:
+# https://halon.io/blog/how-to-test-smtp-servers-using-the-command-line
+
+# 1 - Test from internal w/o TLS and ensure port 25 results in protocol error
+
+docker exec -it mailserver /bin/bash
+telnet 0.0.0.0 25
+ehlo gmail.com
+mail from: <example@gmail.com>
+rcpt to: <hello@example.com> NOTIFY=success,failure
+# Here on rcpt it will error with:
+550 5.5.1 Protocol error
+# exit with: CTRL+d CTRL+]
+
+# 2 - Test from internal w/TLS and ensure port 25 results in send
+docker exec -it mailserver /bin/bash
+openssl s_client -starttls smtp -CApath /etc/ssl/certs/ -connect 0.0.0.0:25 -quiet
+ehlo gmail.com
+mail from: <example@gmail.com>
+rcpt to: <hello@example.com> NOTIFY=success,failure
+data
+From: example@gmail.com
+Subject: hello test
+
+hi
+
+.
+
+# You should see:
+250 2.0.0 Ok: queued as B182F417CB
+
+# note: you can see the new email even outside of the container at:
+ls -lha docker-data/dms/mail-data/example.com/hello/new/
+# You'll see a new file in here, and you can grep the receipt:
+grep -Rn 'B182F417CB' docker-data/dms/mail-data/example.com/hello/new/
+docker-data/dms/mail-data/example.com/hello/new/1669213301.M406326P28805.mail,S=785,W=803:14:Message-Id: <20221123142128.B182F417CB@mail.example.com>
+
+# 3 - Test from external with auth
+# You have to SMPT auth first... then you can send from an existing account to some other account, or from some existing account externally
+
+# Use phpmailer
+# https://github.com/PHPMailer/PHPMailer/blob/master/examples/smtp.phps
+$mail->Host = 'mail.example.com';
+$mail->Port = 587;
+$mail->SMTPAuth = true;
+$mail->Username = 'hello@example.com';
+$mail->Password = 'thepass';
+$mail->setFrom('hello@example.com', 'Hello');
+$mail->addReplyTo('hello@example.com', 'Hello Reply');
+$mail->addAddress('hello@example.com', 'Joseph D. Purcell');
+
+# After running the script you'll see:
+2022-11-23 19:18:53	SERVER -> CLIENT: 250 2.0.0 Ok: queued as B5811417AE
+2022-11-23 19:18:53	CLIENT -> SERVER: QUIT
+2022-11-23 19:18:53	SERVER -> CLIENT: 221 2.0.0 Bye
+
+# 4 - Test sending to online testers
+# Tester 1: https://www.appmaildev.com/en/dkim
+# Tester 2: https://www.mail-tester.com/
+# To use it, just change the address:
+$mail->addAddress('test-1234yusf0@srv1.mail-tester.com', '');
+
+# After running it you'll see:
+2022-11-23 19:27:10	SERVER -> CLIENT: 250 2.0.0 Ok: queued as 8698B417AE
+2022-11-23 19:27:10	CLIENT -> SERVER: QUIT
+2022-11-23 19:27:10	SERVER -> CLIENT: 221 2.0.0 Bye
+
+-----------------------------------------------------------------------------------
+# APPENDIX II. Debugging
+
+# DEBUG TIP 1
+
+I got these errors when doing manual cert:
+
+```
+verify error:num=20:unable to get local issuer certificate
+verify error:num=21:unable to verify the first certificate
+Verify return code: 21 (unable to verify the first certificate)
+```
+
+This was because my CRT file did not have both the CA bundle and the CRT.
+
+Here is a related issue: https://github.com/docker-mailserver/docker-mailserver/issues/1141
+
+# DEBUG TIP 2
+
+If you get this error:
+ssl3_get_record:wrong version number
+
+Add the -quiet flag to the SSL command you're running. And, remember to not use a capital R in "RCPT" command because it tells openssl to regenerate the connection.
+
+# Links:
+# http://www.freekb.net/Article?id=3584
+# https://noknow.info/it/postfix/solved_ssl_routines_renegotiate?lang=en
+# https://www.stevenrombauts.be/2018/12/test-smtp-with-telnet-or-openssl/
+
+# DEBUG TIP 3
+
+I noticed emails weren't getting to it from the outside, then I saw this in dmesg:
+
+dmesg -T
+[Wed Nov 23 15:18:07 2022] oom-kill:constraint=CONSTRAINT_NONE,nodemask=(null),cpuset=docker-82353235e612a0693e3fb29382e3465becc82e8e7f0b40472c5142398103fe89.scope,mems_allowed=0,global_oom,task_memcg=/system.slice/docker-82353235e612a0693e3fb29382e3465becc82e8e7f0b40472c5142398103fe89.scope,task=perl,pid=1194153,uid=110
+[Wed Nov 23 15:18:07 2022] Out of memory: Killed process 1194153 (perl) total-vm:105444kB, anon-rss:89760kB, file-rss:0kB, shmem-rss:0kB, UID:110 pgtables:244kB oom_score_adj:0
+
+# https://docker-mailserver.github.io/docker-mailserver/edge/faq/#what-system-requirements-are-required-to-run-docker-mailserver-effectively
+# 1 core and 1GB of RAM + swap partition is recommended to run docker-mailserver with ClamAV. Otherwise, it could work with 512M of RAM.
+
+I was using 512mb mem, 1 vCPU, 10 gb disk
+
+I bumped it to 1gb mem, 1 vCPU, 10 gb disk
+
+Not sure if that was an actual issue. I didn't see it again.
+
+# Possibly related:
+# https://github.com/docker-mailserver/docker-mailserver/issues/40
+# Or https://github.com/docker-mailserver/docker-mailserver/issues/684
+
+It says that 25 is not supposed to be used externally, use 587 instead?
+I can confirm that port doesn't "die" like 25 does from an external system
+DigitalOcean has documents saying that port 25 is blocked... this is interesting.
+If I SSH into droplet and do:
+nc -l 0.0.0.0 25
+I can connect to the port successfully. So, not sure what is going on.
+
+# DEBUG TIP 4
+
+bash setup.sh config dkim keysize 1024 selector mail
+
+This was creating two!
+
+[   INF   ]  Creating DKIM private key '/tmp/docker-mailserver/opendkim/keys/example.com/mail.private'
+[   INF   ]  Creating DKIM private key '/tmp/docker-mailserver/opendkim/keys/mail.example.com/mail.private'
+
+But, which one is supposed to be used!?
+
+Using the https://www.appmaildev.com/en/dkim tool I was able to iterate on this pretty quickly.
+
+I would make a DNS change, wait for dig to show the new result, then use appmaildev again.
+
+Look at the line on appmaildev that says "Public-Key" to make sure the value matches the  DNS entry.
+
+What I know didn't work:
+
+* keys/mail.example.com/mail.txt didn't work
+* Using  "t=s; s=email;" didn't work
+
+Also, I rebooted the server if I changed the keys at all.
+
+See details: https://github.com/docker-mailserver/docker-mailserver/issues/2022#issuecomment-1325807431
+
+Ultimately, I just used what was in the mail.txt file and the record's value I made looked like:
+
+v=DKIM1; h=sha256; k=rsa; p=alongstring
+
+# DEBUG TIP 5
+
+I got this error at one point:
+Client host rejected: cannot find your hostname,
+
+And I think that was when I was having trouble figuring out host vs domain.
+
+It was helpful to see what the actual DNS entries in /etc/hosts were inside the box:
+
+Two things you can do, both inside the box:
+
+docker exec -it mailserver /bin/bash
+
+cat /etc/hosts
+
+You should see something like:
+
+172.19.0.2	mail.example.com mail
+
+At one point I saw some weird values here like "mail.example.mail.example.com".
+
+You can also run this:
+
+python3 -c  'import socket; print(socket.gethostname()); print(socket.getfqdn());'
+
+You will want something like:
+mail
+mail.example.com
+
+-----------------------------------------------------------------------------------
+# APPENDIX III. Manual cert
+
+# you've got your certs from say namecheap:
+ls -lha /etc/ssl/example.com/ssl-20220614/
+-rw-r--r--  1 root root 5.6K Nov 17 20:40 example_com.ca-bundle
+-rw-r--r--  1 root root 2.2K Nov 17 20:40 example_com.crt
+-rw-r--r--  1 root root 1.1K Nov 17 20:40 example_com.csr
+-rw-------  1 root root 1.7K Nov 17 20:40 example_com.key
+-rw-r--r--  1 root root 7.5K Nov 17 20:40 example_com.p7b
+-rw-r--r--  1 root root  11K Nov 17 20:40 example_com.zip
+
+# You gotta do something fancy with the cert:
+# https://www.ssls.com/knowledgebase/installing-and-configuring-an-ssl-certificate-on-postfix-dovecot-mail-server/
+# I had to do this:
+cd /etc/ssl/example.com/ssl-20220614/
+cat example_com.crt example_com.ca-bundle > public.crt
+mv public.crt /etc/ssl/example.com/live/public.crt
+cp example_com.crt /etc/ssl/example.com/live/private.key
+
+ls -lha /etc/ssl/example.com/live/
+total 20K
+drwxr-xr-x  2 root root 4.0K Nov 20 22:06 .
+drwxr-xr-x 10 root root 4.0K Nov 20 11:21 ..
+-rw-------  1 root root 1.7K Nov 20 11:21 private.key
+-rw-r--r--  1 root root 7.8K Nov 20 22:06 public.crt
+
+docker-compose.yml:
+    volumes:
+      - /etc/ssl/example.com/ssl-20220614:/etc/ssl/example.com/live:ro
+
+mailserver.env:
+SSL_TYPE=manual
+SSL_CERT_PATH=/etc/ssl/example.com/live/example_com.crt
+SSL_KEY_PATH=/etc/ssl/example.com/live/example_com.key
+
+# Note: SSL certs are copied into /etc/dms/tls/cert and key
+docker exec -it mailserver /bin/bash
+cd /etc/dms/tls/
+openssl x509 -in cert -text -noout
+openssl rsa -in key -check
+# csr doesn't apply here...
+#openssl req -text -noout -verify -in server.csr
+# Make sure md5s match
+openssl x509 -noout -modulus -in cert | openssl md5
+openssl rsa -noout -modulus -in key | openssl md5
+
+I ended up not going this route because that cert is for "www.example.com" and "example.com" but not "mail.example.com".
+
+-----------------------------------------------------------------------------------
+# APPENDIX IV. TODOs
+
+# TODO: I have to auth to send to me, do I want that? That means I would only use this for send-only, which is fine. Does that put me at risk of being blocked?
+# TODO: Why does port 25 act like its closed to external? If it should be closed, update firewall rules.
+# TODO: Do I need to add null spfs to www.example.com and others?
+# TODO: Increase TTLs on DNS records
+# TODO: Change SPF from "~all" to "-all"
+# TODO: Make DMARC more strict
+
