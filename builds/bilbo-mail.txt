@@ -239,6 +239,10 @@ POSTFIX_MAILBOX_SIZE_LIMIT=2048000000
 LOGWATCH_INTERVAL=daily
 REPORT_RECIPIENT=MY_EMAIL
 ENABLE_FAIL2BAN=1
+# NOTE: the sender was "mailserver-report@mail.josephdpurcell.com" and I can't figure out where that setting is to confirm this is it, but lets try it and wait 24 hrs :/
+# It looks like its in /etc/logwatch/conf/logwatch.conf
+# You can run it manually to test, just look at the contents of /etc/cron.daily/logwatch
+REPORT_SENDER=postmaster@example.com
 
 # https://github.com/docker-mailserver/docker-mailserver/blob/master/README.md#get-up-and-running
 cd /var/www/mail.example.com/docker/
@@ -706,7 +710,16 @@ openssl rsa -noout -modulus -in key | openssl md5
 I ended up not going this route because that cert is for "www.example.com" and "example.com" but not "mail.example.com".
 
 -----------------------------------------------------------------------------------
-# APPENDIX IV. TODOs
+# APPENDIX IV. Block lists
+
+Check:
+
+https://www.uceprotect.net/en/rblcheck.php
+
+In my case, it sounds like DigitalOcean is flagged as level 2 and 3 and there is nothing I can do about it except pay $1/mo to be listed on https://www.whitelisted.org/
+
+-----------------------------------------------------------------------------------
+# APPENDIX V. TODOs
 
 # TODO: I have to auth to send to me, do I want that? That means I would only use this for send-only, which is fine. Does that put me at risk of being blocked?
 # TODO: Why does port 25 act like its closed to external? If it should be closed, update firewall rules.
