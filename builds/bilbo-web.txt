@@ -1,0 +1,143 @@
+# bilbo-web
+
+A web server that I use for:
+
+* https://www.josephdpurcell.com
+* Feedafever
+* Reverse proxy (used as an alt to ngrok)
+* Having a static IP, which is useful in testing and development
+
+-----------------------------------------------------------------------------------
+# Setup droplet
+
+Login to DigitalOcean and create an ubuntu LTS droplet with backups.
+
+-----------------------------------------------------------------------------------
+# Install reporting
+
+curl -sSL https://repos.insights.digitalocean.com/install.sh | sudo bash
+
+-----------------------------------------------------------------------------------
+# SETUP USER
+
+groupadd bilbo
+useradd -d /home/bilbo -g bilbo -s /bin/bash bilbo
+mkdir /home/bilbo
+chown bilbo:bilbo /home/bilbo
+adduser bilbo sudo
+passwd bilbo
+
+su bilbo
+ssh-keygen -t rsa -b 4096
+# Add ssh key to ~/.ssh/authorized_keys
+chmod g-w ~/.ssh/authorized_keys
+
+-----------------------------------------------------------------------------------
+# SETUP GIT
+
+# git is already installed
+
+git config --global user.email "josephdpurcell@gmail.com"
+git config --global user.name "Joseph D. Purcell"
+
+-----------------------------------------------------------------------------------
+# Various CLI tools
+
+# We want this on this server to test MySQL conn
+sudo apt-get install mysql-client
+
+-----------------------------------------------------------------------------------
+# FIREWALL
+
+# Note: did I need to add iptables-persistent??
+sudo apt-get install iptables-persistent
+iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT -m comment --comment "allow all connections originating from server"
+iptables -A INPUT -i lo -j ACCEPT -m comment --comment "allow everything on loopback interface"
+iptables -A INPUT -p tcp --tcp-flags ALL NONE -j DROP -m comment --comment "drop null packets"
+iptables -A INPUT -p tcp ! --syn -m state --state NEW -j DROP -m comment --comment "drop empty connections and syn-flood packets"
+iptables -A INPUT -p tcp --tcp-flags ALL ALL -j DROP -m comment --comment "drop XMAS packets"
+iptables -A INPUT -p tcp --dport 80 -j ACCEPT -m comment --comment "allow HTTP from WAN"
+iptables -A INPUT -p tcp --dport 443 -j ACCEPT -m comment --comment "allow HTTPS from WAN"
+iptables -A INPUT -p tcp --dport 22 -j ACCEPT -m comment --comment "allow SSH from WAN"
+iptables -P INPUT DROP
+iptables -P FORWARD DROP
+iptables -P OUTPUT ACCEPT
+# TODO: how did I save these?
+
+ip6tables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT -m comment --comment "allow all connections originating from server"
+ip6tables -A INPUT -i lo -j ACCEPT -m comment --comment "allow everything on loopback interface"
+ip6tables -A INPUT -p tcp --tcp-flags ALL NONE -j DROP -m comment --comment "drop null packets"
+ip6tables -A INPUT -p tcp ! --syn -m state --state NEW -j DROP -m comment --comment "drop empty connections and syn-flood packets"
+ip6tables -A INPUT -p tcp --tcp-flags ALL ALL -j DROP -m comment --comment "drop XMAS packets"
+ip6tables -A INPUT -p tcp --dport 80 -j ACCEPT -m comment --comment "allow HTTP from WAN"
+ip6tables -A INPUT -p tcp --dport 443 -j ACCEPT -m comment --comment "allow HTTPS from WAN"
+ip6tables -A INPUT -p tcp --dport 22 -j ACCEPT -m comment --comment "allow SSH from WAN"
+ip6tables -P INPUT DROP
+ip6tables -P FORWARD DROP
+ip6tables -P OUTPUT ACCEPT
+
+cp /etc/iptables/rules.v6 /etc/iptables/rules.v6-2022-11-17-1030
+ip6tables-save > /etc/iptables/rules.v6
+
+-----------------------------------------------------------------------------------
+# SSH
+
+Modify following configs
+
+-----------------------------------------------------------------------------------
+# Unattended upgrades
+
+
+Modify following configs
+
+-----------------------------------------------------------------------------------
+# Apache
+
+# Install apache
+sudo apt install apache2
+sudo systemctl enable apache2
+sudo a2enmod ssl
+sudo a2enmod rewrite
+sudo a2enmod headers
+sudo a2enmod proxy
+# TODO: need proxy_http?
+sudo systemctl restart apache2
+# Setup file perms on web dir
+chown -R www-data:www-data /var/www
+chmod -R g+s /var/www
+sudo usermod -a -G www-data bilbo
+# Install php things
+sudo add-apt-repository ppa:ondrej/php
+sudo apt update
+sudo apt install php7.2 php7.2-cli php7.2-curl php7.2-gd php7.2-intl php7.2-mbstring php7.2-xdebug php7.2-xml php7.2-xsl php7.2-mysql
+sudo update-alternatives --set php /usr/bin/php7.2
+sudo a2enmod php7.2
+sudo systemctl restart apache2
+
+# waaat... apache is segfaulting.
+sudo apt list installed | grep php
+sudo apt remove --purge libapache2-mod-php
+sudo apt remove --purge apache2 php*
+# try again after modifying the above so it should work
+
+-----------------------------------------------------------------------------------
+# PORT FEEDAFEVER
+
+mysql -u USERNAME -p -h HOST --port=PORT DBNAME
+
+CREATE USER 'USERNAME'@'SOURCE_IP' IDENTIFIED WITH mysql_native_password BY 'THE_PASS';
+GRANT ALL PRIVILEGES ON DBNAME.* TO 'USERNAME'@'SOURCE_IP';
+
+$ cat ff.sql | mysql -u USERNAME -p -h HOST --port=PORT DBNAME
+
+# copy files into its place using git repo
+
+# Update config
+
+-----------------------------------------------------------------------------------
+# LOGROTATE
+
+vim /etc/logrotate.d/apache2-f.josephdpurcell.com
+
+# use example
+
