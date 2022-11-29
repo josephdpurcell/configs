@@ -34,11 +34,13 @@ docker compose down
 # login
 docker exec -it mailserver /bin/bash
 
-# account management
+# account/user management
 bash setup.sh help
 bash setup.sh email [add|update|del|restrict|list] help
 # List accounts:
 bash setup.sh email list
+# Create account:
+
 # Change password:
 bash setup.sh email update hello@example.com 'thepass'
 # Delete account:
@@ -74,7 +76,7 @@ Login to DigitalOcean and create an ubuntu LTS droplet with backups.
 curl -sSL https://repos.insights.digitalocean.com/install.sh | sudo bash
 
 -----------------------------------------------------------------------------------
-# Install tools
+# Various CLI tools
 
 apt install net-tools
 
@@ -88,6 +90,9 @@ chown bilbo:bilbo /home/bilbo
 adduser bilbo sudo
 passwd bilbo
 
+# add bilbo to adm to be able to read files created by logrotate
+usermod -a -G adm bilbo
+
 su bilbo
 ssh-keygen -t rsa -b 4096
 # Add ssh key to ~/.ssh/authorized_keys
@@ -98,7 +103,7 @@ chmod g-w ~/.ssh/authorized_keys
 
 # git is already installed
 
-git config --global user.email "myemail"
+git config --global user.email "myemail@example.com"
 git config --global user.name "Joseph D. Purcell"
 
 -----------------------------------------------------------------------------------
@@ -239,7 +244,7 @@ POSTFIX_MAILBOX_SIZE_LIMIT=2048000000
 LOGWATCH_INTERVAL=daily
 REPORT_RECIPIENT=MY_EMAIL
 ENABLE_FAIL2BAN=1
-# NOTE: the sender was "mailserver-report@mail.josephdpurcell.com" and I can't figure out where that setting is to confirm this is it, but lets try it and wait 24 hrs :/
+# NOTE: the sender was "mailserver-report@mail.example.com" and I can't figure out where that setting is to confirm this is it, but lets try it and wait 24 hrs :/
 # It looks like its in /etc/logwatch/conf/logwatch.conf
 # You can run it manually to test, just look at the contents of /etc/cron.daily/logwatch
 REPORT_SENDER=postmaster@example.com
@@ -660,6 +665,46 @@ You will want something like:
 mail
 mail.example.com
 
+# DEBUG TIP 6
+
+DigitalOcean droplets have aggressive DNS cache, eg if a record didn't exist, it resolves the name to nothing, you create the record, and it still resolves to nothing.
+
+I noticed even after machine reboot DNS cache remained.
+
+The reason this is a problem is I was sending email from web.example.com  to mail.example.com but the docker-data/dms/mail-logs/mail.warn log showed this error:
+
+Nov 28 20:02:36 mail postfix/submission/smtpd[1166671]: warning: hostname web.example.com does not resolve to address 167.99.225.240: Name or service not known
+
+SSH'ing into mail.example.com I see:
+
+nslookup web.example.com
+** server can't find web.example.com: NXDOMAIN
+
+but if I do:
+nslookup web.example.com 8.8.8.8
+Server:		8.8.8.8
+
+Looking at /etc/resolve.conf I see 127.0.0.53 is used for DNS, which is just systemd-resolved, which really looks at /etc/netplan/50-cloud-init.yaml which has:
+
+        eth0:
+            nameservers:
+                addresses:
+                - 67.207.67.2
+                - 67.207.67.3
+
+and if I do:
+nslookup web.example.com 67.207.67.2
+** server can't find web.example.com: NXDOMAIN
+
+So... I'm outa luck because I don't manage their DNS servers and https://docs.digitalocean.com/support/check-your-droplets-network-configuration/#correcting-dns-resolution just says to use those DNS servers
+
+While /etc/hosts says to not edit it, it sounds like you can https://www.digitalocean.com/community/questions/why-the-system-ubuntu-14-04-is-configured-manage_etc_hosts-as-true-by-default?comment=145413
+
+And, in this case this is really just a bandaid until DO updates DNS.
+
+vim /etc/hosts
+99.0.0.1 web.example.com
+
 -----------------------------------------------------------------------------------
 # APPENDIX III. Manual cert
 
@@ -721,10 +766,10 @@ In my case, it sounds like DigitalOcean is flagged as level 2 and 3 and there is
 -----------------------------------------------------------------------------------
 # APPENDIX V. TODOs
 
-# TODO: I have to auth to send to me, do I want that? That means I would only use this for send-only, which is fine. Does that put me at risk of being blocked?
+# TODO: I have to auth to send to me (port 25 is closed), do I want that? That means I would only use this for send-only, which is fine. Does that put me at risk of being blocked?
 # TODO: Why does port 25 act like its closed to external? If it should be closed, update firewall rules.
 # TODO: Do I need to add null spfs to www.example.com and others?
 # TODO: Increase TTLs on DNS records
 # TODO: Change SPF from "~all" to "-all"
 # TODO: Make DMARC more strict
-
+# TODO: remove /etc/hosts entry for web.

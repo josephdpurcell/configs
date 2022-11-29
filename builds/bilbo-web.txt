@@ -2,8 +2,9 @@
 
 A web server that I use for:
 
-* https://www.josephdpurcell.com
 * Feedafever
+* Listmonk
+* Directus
 * Reverse proxy (used as an alt to ngrok)
 * Having a static IP, which is useful in testing and development
 
@@ -12,10 +13,22 @@ A web server that I use for:
 
 Login to DigitalOcean and create an ubuntu LTS droplet with backups.
 
+I ran out of mem at 512mb (trying to boot listmonk?), so I resized to 1gb mem
+
+I ran out of mem at 1gb trying to run directus, so I resized to 2gb mem
+
 -----------------------------------------------------------------------------------
 # Install reporting
 
 curl -sSL https://repos.insights.digitalocean.com/install.sh | sudo bash
+
+-----------------------------------------------------------------------------------
+# Various CLI tools
+
+# We want this on this server to test MySQL conn
+sudo apt-get install mysql-client
+
+sudo apt install net-tools
 
 -----------------------------------------------------------------------------------
 # SETUP USER
@@ -27,6 +40,9 @@ chown bilbo:bilbo /home/bilbo
 adduser bilbo sudo
 passwd bilbo
 
+# add bilbo to adm to be able to read files created by logrotate
+usermod -a -G adm bilbo
+
 su bilbo
 ssh-keygen -t rsa -b 4096
 # Add ssh key to ~/.ssh/authorized_keys
@@ -37,14 +53,8 @@ chmod g-w ~/.ssh/authorized_keys
 
 # git is already installed
 
-git config --global user.email "josephdpurcell@gmail.com"
+git config --global user.email "myemail@example.com"
 git config --global user.name "Joseph D. Purcell"
-
------------------------------------------------------------------------------------
-# Various CLI tools
-
-# We want this on this server to test MySQL conn
-sudo apt-get install mysql-client
 
 -----------------------------------------------------------------------------------
 # FIREWALL
@@ -91,7 +101,7 @@ Modify following configs
 Modify following configs
 
 -----------------------------------------------------------------------------------
-# Apache
+# Apache and PHP
 
 # Install apache
 sudo apt install apache2
@@ -100,7 +110,9 @@ sudo a2enmod ssl
 sudo a2enmod rewrite
 sudo a2enmod headers
 sudo a2enmod proxy
-# TODO: need proxy_http?
+sudo a2enmod need proxy_http
+# Look at installed modules:
+sudo apache2ctl -M
 sudo systemctl restart apache2
 # Setup file perms on web dir
 chown -R www-data:www-data /var/www
@@ -121,23 +133,301 @@ sudo apt remove --purge apache2 php*
 # try again after modifying the above so it should work
 
 -----------------------------------------------------------------------------------
-# PORT FEEDAFEVER
+# LOGROTATE
 
-mysql -u USERNAME -p -h HOST --port=PORT DBNAME
+vim /etc/logrotate.d/apache2-f.example.com
+vim /etc/logrotate.d/apache2-list.example.com
+vim /etc/logrotate.d/apache2-cms.example.com
 
-CREATE USER 'USERNAME'@'SOURCE_IP' IDENTIFIED WITH mysql_native_password BY 'THE_PASS';
-GRANT ALL PRIVILEGES ON DBNAME.* TO 'USERNAME'@'SOURCE_IP';
+# use example
 
-$ cat ff.sql | mysql -u USERNAME -p -h HOST --port=PORT DBNAME
+-----------------------------------------------------------------------------------
+# Docker
+
+# Follow docker install https://docs.docker.com/engine/install/ubuntu/
+apt-get update
+sudo apt-get install \
+    ca-certificates \
+    curl \
+    gnupg \
+    lsb-release
+sudo mkdir -p /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+echo \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
+  $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+sudo apt-get update
+sudo apt-get install docker-ce docker-ce-cli containerd.io docker-compose-plugin
+sudo docker run hello-world
+# Delete it
+docker ps -a
+docker rm [thecontainerid]
+
+-----------------------------------------------------------------------------------
+# certbot
+
+# https://certbot.eff.org/instructions?ws=other&os=ubuntufocal
+
+sudo snap install core
+sudo snap refresh core
+sudo apt-get remove certbot
+sudo snap install --classic certbot
+sudo ln -s /snap/bin/certbot /usr/bin/certbot
+
+# How to generate a cert:
+# Temporarily turn off apache
+service apache2 stop
+sudo certbot certonly --standalone
+# output included:
+# Successfully received certificate.
+# Certificate is saved at: /etc/letsencrypt/live/example.com/fullchain.pem
+# Key is saved at:         /etc/letsencrypt/live/example.com/privkey.pem
+sudo certbot renew --dry-run
+# Start apache again
+service apache2 start
+
+-----------------------------------------------------------------------------------
+# MYSQL
+
+docker pull mysql:8.0
+
+mkdir -p /var/www/mysql.example.com/docker
+cd /var/www/mysql.example.com/docker
+
+docker-compose.yml
+```
+version: "3"
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: mysql
+    restart: unless-stopped
+    ports:
+      - "172.17.0.1:3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: "thepass"
+      TZ: UTC
+    volumes:
+      - mysql:/var/lib/mysql
+
+volumes:
+  mysql:
+```
+
+# Note: listening on 172.17.0.1 allows it to be available to other containers at that IP
+
+# Add .env with a project, this is helpful with multiple dockers on the same server each in a different folder named "docker"
+.env
+```
+COMPOSE_PROJECT_NAME=mysql
+```
+
+# Example of setting up a database and user:
+docker exec -it mysql /bin/bash
+mysql
+CREATE DATABASE somename;
+CREATE USER 'somename'@'%' IDENTIFIED WITH mysql_native_password BY 'somepass';
+GRANT ALL PRIVILEGES ON somename.* TO 'somename'@'%';
+# Note: root access remains denied except from localhist (ie docker exec then mysql)
+
+# Connect to mysql as root:
+docker exec -it mysql /bin/bash
+mysql
+# Connect to mysql as a user from host machine:
+# Note: specifying host 0.0.0.0 is required since default mysql cli looks for socket
+mysql -u dbname -p -h 0.0.0.0 --port=3306 dbname
+
+# tips:
+docker compose rm mysql
+
+# USAGE
+docker compose down
+docker compose up -d mysql
+
+-----------------------------------------------------------------------------------
+# LISTMONK
+
+# https://yasoob.me/posts/setting-up-listmonk-opensource-newsletter-mailing/
+# https://listmonk.app/docs/installation/
+
+mkdir -p /var/www/list.example.com/docker/
+cd /var/www/list.example.com/docker/
+wget https://raw.githubusercontent.com/knadh/listmonk/master/install-prod.sh
+# Add .env with a project, this is helpful with multiple dockers on the same server each in a different folder named "docker"
+.env
+```
+COMPOSE_PROJECT_NAME=listmonk
+```
+# Change docker-compose to docker compose in certain places:
+vim install-prod.sh
+bash install-prod.sh
+
+# Setup a fake HTML page and robots, and logs dir
+mkdir /var/www/list.example.com/html
+echo "<h1>You are in the wrong place.</h1>" > /var/www/list.example.com/html/index.html
+echo -e "User-agent: *\nDisallow: /" > /var/www/list.example.com/html/robots.txt
+mkdir /var/www/list.example.com/logs
+touch /var/www/list.example.com/logs/access.log
+touch /var/www/list.example.com/logs/error.log
+chown -R www-data:www-data /var/www/list.example.com/logs
+chown -R www-data:www-data /var/www/list.example.com/html
+
+# Generate a cert for the domain used; see certbot instructions
+
+# Setup apache to route to the docker container
+vim /etc/apache2/sites-available/list.example.com.conf
+a2ensite list.example.com
+service apache2 reload
+
+# USAGE:
+# Login
+docker exec -it listmonk_app /bin/sh
+# Down
+docker compose down
+# Up
+docker compose up -d db
+if u never run this command, execute it: docker compose run --rm app ./listmonk --install
+docker compose up -d app
+
+-----------------------------------------------------------------------------------
+# FEEDAFEVER
+
+# Create database and user:
+cd /var/www/mysql.example.com/docker
+docker exec -it mysql /bin/bash
+mysql
+CREATE DATABASE feedafever;
+CREATE USER 'feedafever'@'%' IDENTIFIED WITH mysql_native_password BY 'thepass';
+GRANT ALL PRIVILEGES ON feedafever.* TO 'feedafever'@'%';
+
+cat ff.sql | mysql -u USERNAME -p -h HOST --port=PORT DBNAME
 
 # copy files into its place using git repo
 
 # Update config
 
 -----------------------------------------------------------------------------------
-# LOGROTATE
+# DIRECTUS
 
-vim /etc/logrotate.d/apache2-f.josephdpurcell.com
+Helpful URLs:
 
-# use example
+* https://docs.directus.io/self-hosted/config-options.html
+* https://docs.directus.io/configuration/flows.html#data-chain-variables
+* https://github.com/directus/directus/issues/16674
+* https://docs.directus.io/reference/environment-variables/
 
+# Add .env with a project, this is helpful with multiple dockers on the same server each in a different folder named "docker"
+.env
+```
+COMPOSE_PROJECT_NAME=cms
+```
+
+```
+version: '3'
+services:
+  directus:
+    container_name: directus
+    image: directus/directus:latest
+    restart: unless-stopped
+    network_mode: "host"
+    ports:
+      - 8055:8055
+    volumes:
+      # By default, uploads are stored in /directus/uploads
+      # Always make sure your volumes matches the storage root when using
+      # local driver
+      - ./uploads:/directus/uploads
+      # Make sure to also mount the volume when using SQLite
+      # - ./database:/directus/database
+      # If you want to load extensions from the host
+      # - ./extensions:/directus/extensions
+    environment:
+      KEY: 'auuid'
+      SECRET: 'auuid'
+      #LOG_LEVEL: 'trace'
+
+      DB_CLIENT: 'mysql'
+      DB_HOST: '0.0.0.0'
+      DB_PORT: '3306'
+      DB_DATABASE: 'directus'
+      DB_USER: 'directus'
+      DB_PASSWORD: 'thepass'
+
+      ADMIN_EMAIL: 'example@gmail.com'
+      ADMIN_PASSWORD: 'apass that you should change after first boot'
+
+      # Make sure to set this in production
+      # (see https://docs.directus.io/self-hosted/config-options#general)
+      PUBLIC_URL: 'https://cms.example.com'
+
+      EMAIL_FROM: 'mailman@example.com'
+      EMAIL_TRANSPORT: 'smtp'
+      EMAIL_SMTP_HOST: 'mail.example.com'
+      EMAIL_SMTP_PORT: '587'
+      EMAIL_SMTP_USER: 'mailman@example.com'
+      EMAIL_SMTP_PASSWORD: 'thepass'
+```
+
+# Create database and user:
+docker exec -it mysql /bin/bash
+mysql
+CREATE DATABASE directus;
+CREATE USER 'directus'@'%' IDENTIFIED WITH mysql_native_password BY 'thepass';
+GRANT ALL PRIVILEGES ON directus.* TO 'directus'@'%';
+
+# Generate a cert for the domain used; see certbot instructions
+
+# Setup apache to route to the docker container
+vim /etc/apache2/sites-available/cms.example.com.conf
+a2ensite cms.example.com
+service apache2 reload
+
+# On first boot run in foreground to make sure it goes OK:
+docker compose up directus
+I ran into:
+ Error: ROLLBACK - Cannot enqueue Query after fatal error.
+ directus  |   code: 'PROTOCOL_ENQUEUE_AFTER_FATAL_ERROR',
+Maybe its an out of mem issue?
+Yep. After resize, delete db, create db, and boot again it works.
+
+# USAGE:
+# Login
+docker exec -it directus /bin/sh
+# Down
+docker compose down
+# Up
+docker compose up -d directus
+
+-----------------------------------------------------------------------------------
+# APPENDIX I. Debugging
+
+# DEBUG TIP 1: Directus
+
+Saving workflow error:
+
+[RECORD_NOT_UNIQUE] Field "resolve" has to be unique.
+
+https://github.com/directus/directus/issues/14185
+
+# DEBUG TIP 2: Directus
+
+conditions don't work? so use Run Script https://github.com/directus/directus/issues/14571#issuecomment-1315513057
+
+detailed examples https://github.com/directus/directus/issues/16674
+
+# DEBUG TIP 3: Listmonk
+
+listmonk can't resub
+
+https://github.com/knadh/listmonk/issues/588
+
+-----------------------------------------------------------------------------------
+# APPENDIX II. TODOs
+
+# TODO: backups; see volume mounts https://listmonk.app/docs/configuration/#using-volumes; its at /var/lib/docker/volumes/docker_listmonk-data/_data
+# TODO: custom templates for subscribe
+# TODO: containerize feedafever
+# TODO: lock down mysql users to an IP instead of %
+# TODO: move my main site over
