@@ -30,6 +30,10 @@ sudo apt-get install mysql-client
 
 sudo apt install net-tools
 
+sudo apt install tree
+
+sudo apt install unzip
+
 -----------------------------------------------------------------------------------
 # SETUP USER
 
@@ -164,6 +168,17 @@ sudo docker run hello-world
 docker ps -a
 docker rm [thecontainerid]
 
+# Configure logs
+vim /etc/docker/daemon.json
+{
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "10m",
+    "max-file": "7"
+  }
+}
+service docker restart
+
 -----------------------------------------------------------------------------------
 # certbot
 
@@ -251,6 +266,7 @@ docker compose up -d mysql
 
 # https://yasoob.me/posts/setting-up-listmonk-opensource-newsletter-mailing/
 # https://listmonk.app/docs/installation/
+# https://devgypsy.com/post/2020-08-18-installing-listmonk-newsletter-manager/
 
 mkdir -p /var/www/list.example.com/docker/
 cd /var/www/list.example.com/docker/
@@ -281,11 +297,57 @@ vim /etc/apache2/sites-available/list.example.com.conf
 a2ensite list.example.com
 service apache2 reload
 
+# Refactor to use static
+# Copy the static files
+# Note: I setup ~/src/{domain}/{vendor}/{package} because Go community suggested that at one point and I really like it
+cd ~
+mkdir -p ~/src/github.com/knadh
+cd ~/src/github.com/knadh
+git clone https://github.com/knadh/listmonk
+cd /var/www/list.example.com/docker
+cp -r ~/src/github.com/knadh/listmonk/static ./static
+# A fix for dirs, see https://github.com/knadh/listmonk/issues/1074
+mv static/public/templates/* static/public/
+# Make sure directories are right:
+ls static/
+email-templates  public
+ls static/public
+ls static/public/
+archive.html  home.html  index.html  message.html  optin.html  static  subscription-form.html  subscription.html
+# Modify docker-compose.yml to use custom command and static volume according to https://yasoob.me/posts/setting-up-listmonk-opensource-newsletter-mailing/
+    command: "./listmonk --static-dir=/listmonk/static"
+    volumes:
+      - ./static:/listmonk/static
+# Run this to ensure it takes the changes; only needs run once
+# Note: the blog post suggests `docker compose up --force-recreate -d app` but this is not necessary; I tried plain up and the fs and ps in container reflect the changes
+
+# Access database like so:
+$ docker exec -it listmonk_db_1 /bin/bash
+root@623c84d3d072:/# psql -d listmonk  -U listmonk -W
+Password:
+psql (11.11 (Debian 11.11-1.pgdg90+1))
+Type "help" for help.
+listmonk=#
+SELECT * from subscriber_lists;
+UPDATE subscriber_lists SET status='confirmed' WHERE list_id=4;
+
+# UPGRADE:
+docker exec -t listmonk_app ./listmonk --version
+v2.2.0 (bbbf28c 2022-07-30T18:18:24Z)
+docker stop listmonk_app
+docker compose pull
+docker compose run --rm app ./listmonk --upgrade
+docker compose up -d app
+docker exec -t listmonk_app ./listmonk --version
+v2.3.0 (448f0e3 2022-11-27T17:52:51Z)
+
 # USAGE:
 # Login
 docker exec -it listmonk_app /bin/sh
 # Down
 docker compose down
+# Or a specific one:
+docker stop listmonk_app
 # Up
 docker compose up -d db
 if u never run this command, execute it: docker compose run --rm app ./listmonk --install
@@ -330,6 +392,7 @@ services:
   directus:
     container_name: directus
     image: directus/directus:latest
+/bin/bash: line 1: pbpaste: command not found
     restart: unless-stopped
     network_mode: "host"
     ports:
@@ -422,6 +485,12 @@ detailed examples https://github.com/directus/directus/issues/16674
 listmonk can't resub
 
 https://github.com/knadh/listmonk/issues/588
+
+# DEBUG TIP 4: Docker logs
+
+Any container name you can get logs for:
+
+docker logs -f listmonk_app
 
 -----------------------------------------------------------------------------------
 # APPENDIX II. TODOs
