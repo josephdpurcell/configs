@@ -170,6 +170,14 @@ Modify following configs
 service unattended-upgrades restart
 
 -----------------------------------------------------------------------------------
+# journal
+
+# I noticed disk usage kept creeping up, its /var/log/journal
+vim /etc/systemd/journald.conf
+SystemMaxUse=800M
+service systemd-journald restart
+
+-----------------------------------------------------------------------------------
 # LOGROTATE
 
 nothing
@@ -217,6 +225,15 @@ sudo certbot renew --dry-run
 sudo iptables -L --line-numbers
 sudo iptables -D INPUT THE_LINE_NUMBER
 sudo iptables -L --line-numbers
+
+# RENEW:
+sudo -s
+iptables -A INPUT -p tcp --dport 80 -j ACCEPT -m comment --comment "allow HTTP from WAN (temporary)"
+certbot renew --dry-run
+certbot renew
+iptables -L --line-numbers
+iptables -D INPUT THE_LINE_NUMBER
+iptables -L --line-numbers
 
 -----------------------------------------------------------------------------------
 # docker-mailserver
@@ -284,6 +301,8 @@ Priority: 10
 # http://www.open-spf.org/
 # https://www.namecheap.com/support/knowledgebase/article.aspx/317/2237/how-do-i-add-txtspfdkimdmarc-records-for-my-domain/
 # https://postale.io/fr/blog/the-spf-record-explained
+# https://mecsa.jrc.ec.europa.eu/
+# https://github.com/internetstandards/toolbox-wiki
 
 # Add this TXT record:
 Type: TXT
@@ -300,21 +319,50 @@ TTL: lowest
 # After testing, change "~all" to "-all" which changes the policy from softfail to hardfail, and increase the TTL
 
 # DKIM
+# Links:
+# * https://www.dnswatch.info/dkim/create-dns-record
+# * https://en.wikipedia.org/wiki/DomainKeys_Identified_Mail
+# * http://dkim.org/specs/rfc4871-dkimbase.html
+# * https://dkimcore.org/tools/ -- super useful! note: if txt record is "mail._domainkey" the selector is just "mail"
+# * http://stackoverflow.com/questions/8705035/how-to-send-email-with-phpmailer-with-dkim-signature
+# * https://github.com/lieser/dkim_verifier/issues/41#issuecomment-69327926
+# * https://easyengine.io/tutorials/mail/setup-opendkim/ says you can just email autorespond+dkim@dk.elandsys.com or check-auth2@verifier.port25.com
+# * https://www.mail-tester.com/
+
 # This guide is useful: https://www.dnswatch.info/dkim/create-dns-record
 bash setup.sh config dkim keysize 1024 selector mail
 [   INF   ]  Creating DKIM private key '/tmp/docker-mailserver/opendkim/keys/example.com/mail.private'
 [   INF   ]  Creating DKIM private key '/tmp/docker-mailserver/opendkim/keys/mail.example.com/mail.private'
 docker exec -it mailserver /bin/bash
-cat /tmp/docker-mailserver/opendkim/keys/example.com/jp20221123.txt
-# use it as-is
+cat /etc/opendkim/keys/example.com/mail.txt
+# NOTE: on the server itself you might find:
+ls -lha /etc/ssl/example.com/dkim/
+# but these are not what you need?
+# Copy that into a DNS record:
 Type: TXT
 Host: mail._domainkey
-Value: v=DKIM1; h=sha256; k=rsa; p=thevalue
+Value:
+v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDTXTaywEW9YnFqlvNT2gK2r21mji+2LkGXBPR5+MkJtOiOaMFK3k2xFb6TSYyj4XjyW6BvqKq8NMGsPddPb1jAHbe+38GjlWMTU9eUqdNWJnX81xbehi85msmqMOcMBN7aiAyoP8uAhGaymBS/q3HyuK5XLMg8m6AAIBlLI1YlhQIDAQAB
 TTL: lowest
+
+# Make sure you see it:
+$ dig +short TXT mail._domainkey.example.com
+# OR
+$ dig mail._domainkey.example.com TXT
+
+# TEST using https://app.easydmarc.com/email-investigation/i2rn12904ni3be2vp8unr7p682gh9qv3atnvvg81
+
+# Get help, which isnst super useful
+root@bilbo-mail:/var/www/example.com/docker# bash setup.sh config dkim help
 
 # Note: re-running config dkim doesn't overwrite the key
 
-dig mail._domainkey.example.com TXT
+# troubleshoot:
+ssh into docker
+tail -f /var/log/*
+send an email and see this line:
+Jul 20 01:24:37 mail opendkim[452]: 25D0641832: DKIM-Signature field added (s=mail, d=example.com)
+
 
 # PTR
 
@@ -348,12 +396,12 @@ There are a variety of testing tools out there that do the whole thing:
 * https://testconnectivity.microsoft.com/tests/InboundSMTP/input
 * https://testconnectivity.microsoft.com/tests/OutboundSMTP/input
 * https://www.appmaildev.com/en/dkim
-* https://www.mail-tester.com/
+* https://www.mail-tester.com/ - it generates an email to send an email to, then tells you how spammy your email was
 * https://mxtoolbox.com/SuperTool.aspx
-* maybe http://www.open-spf.org/Tools/
+* http://www.open-spf.org/Tools/ - lists some resources
 * https://dkimcore.org/tools/keycheck.html
 * https://www.appmaildev.com/en/dkim/
-* https://www.kitterman.com/spf/validate.html (https://www.kitterman.com/spf/source.html)
+* https://www.kitterman.com/spf/validate.html (https://www.kitterman.com/spf/source.html) - for testing spf
 
 -----------------------------------------------------------------------------------
 # APPENDIX I.A. Testing SSL

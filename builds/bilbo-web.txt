@@ -7,6 +7,7 @@ A web server that I use for:
 * Directus
 * Reverse proxy (used as an alt to ngrok)
 * Having a static IP, which is useful in testing and development
+* Minecraft
 
 -----------------------------------------------------------------------------------
 # Setup droplet
@@ -202,6 +203,13 @@ sudo certbot renew --dry-run
 # Start apache again
 service apache2 start
 
+# RENEW
+sudo -s
+service apache2 stop
+certbot renew --dry-run
+certbot renew
+service apache2 start
+
 -----------------------------------------------------------------------------------
 # MYSQL
 
@@ -340,18 +348,26 @@ docker compose run --rm app ./listmonk --upgrade
 docker compose up -d app
 docker exec -t listmonk_app ./listmonk --version
 v2.3.0 (448f0e3 2022-11-27T17:52:51Z)
+v2.4.0 (c668523 2023-03-20T13:50:31Z)
+
 
 # USAGE:
 # Login
 docker exec -it listmonk_app /bin/sh
-# Down
-docker compose down
-# Or a specific one:
+# Stop
 docker stop listmonk_app
-# Up
+docker stop listmonk_db
+# Start
+docker start listmonk_app
+docker start listmonk_db
+
+# Up (do you need this beyond first?)
+docker compose up -d
+# Or a specific one:
 docker compose up -d db
-if u never run this command, execute it: docker compose run --rm app ./listmonk --install
 docker compose up -d app
+# if u never run this command, execute it: docker compose run --rm app ./listmonk --install
+
 
 -----------------------------------------------------------------------------------
 # FEEDAFEVER
@@ -463,6 +479,23 @@ docker compose down
 # Up
 docker compose up -d directus
 
+
+-----------------------------------------------------------------------------------
+# MINECRAFT
+
+* https://serialized.net/2021/02/minecraft_server_docker/
+
+# Allow it and start it:
+root@web:/var/www/example.com/docker# iptables -A INPUT -p tcp -s 1.1.1.1 --dport 25565 -j ACCEPT -m comment --comment "allow minecraft from home"
+root@web:/var/www/example.com/docker# docker run -d -p 25565:25565 -v /var/www/example.com/docker/data --name mc -e EULA=TRUE --restart always itzg/minecraft-server
+
+# Client:
+sudo snap install mc-installer
+
+
+# Hmm... you gotta pay $30? Is that a lifetime license?
+
+
 -----------------------------------------------------------------------------------
 # APPENDIX I. Debugging
 
@@ -500,3 +533,13 @@ docker logs -f listmonk_app
 # TODO: containerize feedafever
 # TODO: lock down mysql users to an IP instead of %
 # TODO: move my main site over
+
+Listmonk:
+- change email template to my liking:
+    * link to "privacy"
+- send the initial email: "Welcome back!"
+    * instructions that you must add "mailman@example.com"; this is the same as before
+    * explain why I went dormant: Transitioning to an additional child + Google mail shutting me down, I now have DMARC
+- change header to link to an "about" and put an "about" in the footer of the pages
+- change SPF from softfail to hard
+- change DMARC from none to reject
