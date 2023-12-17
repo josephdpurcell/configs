@@ -7,7 +7,6 @@ A web server that I use for:
 * Directus
 * Reverse proxy (used as an alt to ngrok)
 * Having a static IP, which is useful in testing and development
-* Minecraft
 
 -----------------------------------------------------------------------------------
 # Setup droplet
@@ -478,22 +477,6 @@ docker exec -it directus /bin/sh
 docker compose down
 # Up
 docker compose up -d directus
-
-
------------------------------------------------------------------------------------
-# MINECRAFT
-
-* https://serialized.net/2021/02/minecraft_server_docker/
-
-# Allow it and start it:
-root@web:/var/www/example.com/docker# iptables -A INPUT -p tcp -s 1.1.1.1 --dport 25565 -j ACCEPT -m comment --comment "allow minecraft from home"
-root@web:/var/www/example.com/docker# docker run -d -p 25565:25565 -v /var/www/example.com/docker/data --name mc -e EULA=TRUE --restart always itzg/minecraft-server
-
-# Client:
-sudo snap install mc-installer
-
-
-# Hmm... you gotta pay $30? Is that a lifetime license?
 
 
 -----------------------------------------------------------------------------------

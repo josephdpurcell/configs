@@ -23,8 +23,6 @@ A few build notes from others:
 
 Things to remember when using it:
 
-# Did I setup certbot? If not, need to regenerate SSL cert before expiry.
-
 # start/stop:
 # Use docker-compose up / down, not docker-compose start / stop. Otherwise, the container is not properly destroyed and you may experience problems during startup because of inconsistent state.
 cd /var/www/example.com/docker/
